@@ -54,6 +54,32 @@ static void GPIO_Init_C(void);
 
 static void ADC_init(void);
 
+void set_low(uint32_t Shift_Register_Data, uint32_t Shift_Register_Clock) {
+	GPIO_ResetBits(GPIOC, Shift_Register_Data);
+	GPIO_ResetBits(GPIOC, Shift_Register_Clock);
+	GPIO_SetBits(GPIOC, Shift_Register_Clock);
+}
+
+void set_high(uint32_t Shift_Register_Data, uint32_t Shift_Register_Clock) {
+	GPIO_SetBits(GPIOC, Shift_Register_Data);
+	GPIO_ResetBits(GPIOC, Shift_Register_Clock);
+	GPIO_SetBits(GPIOC, Shift_Register_Clock);
+	GPIO_ResetBits(GPIOC, Shift_Register_Data);
+}
+
+void led_reset(uint32_t Shift_Register_Reset) {
+	GPIO_ResetBits(GPIOC, Shift_Register_Reset);
+	GPIO_SetBits(GPIOC, Shift_Register_Reset);
+}
+
+void array_to_led(int car_pattern[19]) {
+	for(int i = 18; i >= 0; i--){
+		if(car_pattern[i] == 1)
+			set_high(Shift_Register_Data, Shift_Register_Clock);
+		else
+			set_low(Shift_Register_Data, Shift_Register_Clock);
+	}
+}
 
 int main(void)
 {
@@ -61,36 +87,22 @@ int main(void)
 	can be done here if it was not done before main() was called. */
 	prvSetupHardware();
 
-
 	/* Enable the GPIO Clock */
 	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOC, ENABLE);
 	/* Enable clock for ADC1 */
 	RCC_APB2PeriphClockCmd(RCC_APB2Periph_ADC1, ENABLE);
 
-
-	//GPIO_Init
-	//GPIO_Init_Shift_Register();
+	GPIO_Init
+	GPIO_Init_Shift_Register();
 	GPIO_Init_C();
 	ADC_init();
-	printf("%u",ADC_Start_Conversion());
+	uint16_t converted_data = ADC_Start_Conversion();
 
-	//Reset(Clear) -> output = 0000
-	GPIO_ResetBits(GPIOC, Shift_Register_Reset);
-	for (int i = 0; i<10; i++);
-	GPIO_SetBits(GPIOC, Shift_Register_Reset);
+	printf("the value is: %u",converted_data);
 
-	//Insert L + Shift -> output = 0000
-	GPIO_ResetBits(GPIOC, Shift_Register_Data);
-	GPIO_ResetBits(GPIOC, Shift_Register_Clock);
-	for (int i = 0; i<5; i++);
-	GPIO_SetBits(GPIOC, Shift_Register_Clock);
-
-	//Insert H + Shift -> output = 1000
-	GPIO_SetBits(GPIOC, Shift_Register_Data);
-	GPIO_ResetBits(GPIOC, Shift_Register_Clock);
-	for (int i = 0; i<5; i++);
-	GPIO_SetBits(GPIOC, Shift_Register_Clock);
-	GPIO_ResetBits(GPIOC, Shift_Register_Data);
+	led_reset(Shift_Register_Reset);
+	int pattern[] = {1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1};
+	array_to_led(pattern);
 
 	/* Create the queue used by the queue send and queue receive tasks.
 	http://www.freertos.org/a00116.html */
@@ -110,6 +122,8 @@ int main(void)
 
 	return 0;
 }
+
+
 
 static void GPIO_Init_C (void)
 {
@@ -159,7 +173,7 @@ static uint16_t ADC_Start_Conversion()
 	while (!ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC));
 
 // Get the value
-	converted_data = ADC_GetConversionValue(ADC1);
+	converted_data =  ADC_GetConversionValue(ADC1);
 	return converted_data;
 }
 
