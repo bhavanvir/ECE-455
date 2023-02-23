@@ -1,8 +1,8 @@
-
 /* Standard includes. */
 #include <stdint.h>
 #include <stdio.h>
 #include "stm32f4_discovery.h"
+#include <math.h>
 /* Kernel includes. */
 #include "stm32f4xx.h"
 #include "../FreeRTOS_Source/include/FreeRTOS.h"
@@ -11,48 +11,35 @@
 #include "../FreeRTOS_Source/include/task.h"
 #include "../FreeRTOS_Source/include/timers.h"
 
-
-
 /*-----------------------------------------------------------*/
-#define mainQUEUE_LENGTH 100
+#define MAX_POT 4095
 
-#define amber  	0
-#define green  	1
-#define red  	2
-#define blue  	3
-
-#define amber_led	LED3
-#define green_led	LED4
-#define red_led		LED5
-#define blue_led	LED6
-
+uint32_t Green_Light = GPIO_Pin_2;
+uint32_t Yellow_Light = GPIO_Pin_1;
+uint32_t Red_Light = GPIO_Pin_0;
 uint32_t Shift_Register_Reset = GPIO_Pin_8;
 uint32_t Shift_Register_Data = GPIO_Pin_6;
 uint32_t Shift_Register_Clock = GPIO_Pin_7;
 
+xQueueHandle xQueue_POT = 0;
+xQueueHandle xQueue_Traffic_Generated = 0;
+xQueueHandle xQueue_Lights_Status = 0;
+TimerHandle_t  xGreen_Light = 0;
+TimerHandle_t  xYellow_Light = 0;
+TimerHandle_t  xRed_Light = 0;
 
-/*
- * TODO: Implement this function for any hardware specific clock configuration
- * that was not already performed before main() was called.
- */
 static void prvSetupHardware( void );
-
-/*
- * The queue send and receive tasks as described in the comments at the top of
- * this file.
- */
-static void Manager_Task( void *pvParameters );
-static void Blue_LED_Controller_Task( void *pvParameters );
+static void Traffic_Flow_Adjustment_Task( void *pvParameters );
+static void Traffic_Generator_Task( void *pvParameters );
+static void Traffic_Light_State_Task( void *pvParameters );
+static void System_Display_Task( void *pvParameters );
+static void vGreenLightCallBack( TimerHandle_t xTimer );
+static void vYellowLightCallBack( TimerHandle_t xTimer );
+static void vRedLightCallBack( TimerHandle_t xTimer );
 static uint16_t ADC_Start_Conversion(void);
-xQueueHandle xQueue_handle = 0;
-
-
-/*-----------------------------------------------------------*/
-
-
 static void GPIO_Init_C(void);
-
-static void ADC_init(void);
+static void ADC_Init_C(void);
+/*-----------------------------------------------------------*/
 
 void set_low(uint32_t Shift_Register_Data, uint32_t Shift_Register_Clock) {
 	GPIO_ResetBits(GPIOC, Shift_Register_Data);
@@ -83,8 +70,6 @@ void array_to_led(int car_pattern[19]) {
 
 int main(void)
 {
-	/* Configure the system ready to run the demo.  The clock configuration
-	can be done here if it was not done before main() was called. */
 	prvSetupHardware();
 
 	/* Enable the GPIO Clock */
@@ -92,35 +77,31 @@ int main(void)
 	/* Enable clock for ADC1 */
 	RCC_APB2PeriphClockCmd(RCC_APB2Periph_ADC1, ENABLE);
 
-	GPIO_Init
-	GPIO_Init_Shift_Register();
 	GPIO_Init_C();
-	ADC_init();
-	uint16_t converted_data = ADC_Start_Conversion();
+	ADC_Init_C();
 
-	printf("the value is: %u",converted_data);
+	xQueue_POT = xQueueCreate(1, sizeof(uint16_t));
+	xQueue_Traffic_Generated = xQueueCreate(1, sizeof(uint16_t));
+	xQueue_Lights_Status = xQueueCreate(1, sizeof(uint32_t));
 
+	/*
 	led_reset(Shift_Register_Reset);
-	int pattern[] = {1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1};
+	int pattern[] = {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 	array_to_led(pattern);
+	led_reset(Shift_Register_Reset);
+	*/
 
-	/* Create the queue used by the queue send and queue receive tasks.
-	http://www.freertos.org/a00116.html */
-	xQueue_handle = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
-							sizeof( uint16_t ) );	/* The size of each item the queue holds. */
-
-	/* Add to the registry, for the benefit of kernel aware debugging. */
-	vQueueAddToRegistry( xQueue_handle, "MainQueue" );
-
-	xTaskCreate( Manager_Task, "Manager", configMINIMAL_STACK_SIZE, NULL, 2, NULL);
-
-	xTaskCreate( Blue_LED_Controller_Task, "Blue_LED", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-
-
+	xTaskCreate(Traffic_Flow_Adjustment_Task, "Traffic_Flow_Adjustment_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+	xTaskCreate(Traffic_Generator_Task, "Traffic_Generator_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+	xTaskCreate(Traffic_Light_State_Task, "Traffic_Light_State_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+	xGreen_Light = xTimerCreate("Green_Light_Timer", pdMS_TO_TICKS(2000), pdFALSE, (void *) 0, vGreenLightCallBack);
+	xYellow_Light = xTimerCreate("Yellow_Light_Timer", pdMS_TO_TICKS(1000), pdFALSE, (void *) 0, vYellowLightCallBack);
+	xRed_Light = xTimerCreate("Red_Light_Timer", pdMS_TO_TICKS(2000), pdFALSE, (void *) 0, vRedLightCallBack);
 	/* Start the tasks and timer running. */
 	vTaskStartScheduler();
 
-	return 0;
+	/* Should not reach here. */
+	for(;;);
 }
 
 
@@ -139,7 +120,7 @@ static void GPIO_Init_C (void)
 }
 
 //ADC on PC3
-static void ADC_init()
+static void ADC_Init_C()
 {
     GPIO_InitTypeDef GPIO_InitStruct;
 
@@ -149,19 +130,19 @@ static void ADC_init()
 	GPIO_Init(GPIOC, &GPIO_InitStruct);
 
 	// Init ADC1
-	    ADC_InitTypeDef ADC_InitStruct;
-		ADC_InitStruct.ADC_ContinuousConvMode = DISABLE;
-		ADC_InitStruct.ADC_DataAlign = ADC_DataAlign_Right;
-		ADC_InitStruct.ADC_ExternalTrigConv = DISABLE;
-		ADC_InitStruct.ADC_ExternalTrigConvEdge = ADC_ExternalTrigConvEdge_None;
-		ADC_InitStruct.ADC_NbrOfConversion = 1;
-		ADC_InitStruct.ADC_Resolution = ADC_Resolution_12b;
-		ADC_InitStruct.ADC_ScanConvMode = DISABLE;
-		ADC_Init(ADC1, &ADC_InitStruct);
-		ADC_Cmd(ADC1, ENABLE);
+	ADC_InitTypeDef ADC_InitStruct;
+	ADC_InitStruct.ADC_ContinuousConvMode = DISABLE;
+	ADC_InitStruct.ADC_DataAlign = ADC_DataAlign_Right;
+	ADC_InitStruct.ADC_ExternalTrigConv = DISABLE;
+	ADC_InitStruct.ADC_ExternalTrigConvEdge = ADC_ExternalTrigConvEdge_None;
+	ADC_InitStruct.ADC_NbrOfConversion = 1;
+	ADC_InitStruct.ADC_Resolution = ADC_Resolution_12b;
+	ADC_InitStruct.ADC_ScanConvMode = DISABLE;
+	ADC_Init(ADC1, &ADC_InitStruct);
+	ADC_Cmd(ADC1, ENABLE);
 
 	// Select input channel for ADC1
-		ADC_RegularChannelConfig(ADC1, ADC_Channel_13, 1, ADC_SampleTime_84Cycles);
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_13, 1, ADC_SampleTime_84Cycles);
 }
 
 static uint16_t ADC_Start_Conversion()
@@ -172,93 +153,74 @@ static uint16_t ADC_Start_Conversion()
 	// Wait until conversion is finish
 	while (!ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC));
 
-// Get the value
+	// Get the value
 	converted_data =  ADC_GetConversionValue(ADC1);
 	return converted_data;
 }
 
 
 /*-----------------------------------------------------------*/
+void Traffic_Flow_Adjustment_Task( void *pvParameters ){
+	int POT = 0;
 
-static void Manager_Task( void *pvParameters ){
-	uint16_t tx_data = amber;
-
-
-	while(1)
-	{
-
-		if(tx_data == amber)
-			//
-		if(tx_data == green)
-			//
-		if(tx_data == red)
-			//
-		if(tx_data == blue)
-			//
-
-		if( xQueueSend(xQueue_handle,&tx_data,1000))
-		{
-			printf("Manager: %u ON!\n", tx_data);
-			if(++tx_data == 4)
-				tx_data = 0;
-			vTaskDelay(1000);
-		}
-		else
-		{
-			printf("Manager Failed!\n");
+	while(1){
+		POT = ADC_Start_Conversion();
+		if(xQueueOverwrite(xQueue_POT, &POT) == pdPASS){
+			printf("Traffic_Flow_Adjustment_Task: %d\n", POT);
+			vTaskDelay(pdMS_TO_TICKS(100));
 		}
 	}
 }
 
-/*-----------------------------------------------------------*/
+void Traffic_Generator_Task( void *pvParameters ){
+	int POT = 0;
 
-static void Blue_LED_Controller_Task( void *pvParameters )
-{/*
-	uint16_t rx_data;
-	while(1)
-	{
-		if(xQueueReceive(xQueue_handle, &rx_data, 500))
-		{
-			if(rx_data == blue)
-			{
-				vTaskDelay(250);
-				STM_EVAL_LEDOff(blue_led);
-				printf("Blue Off.\n");
-			}
-			else
-			{
-				if( xQueueSend(xQueue_handle,&rx_data,1000))
-					{
-						printf("BlueTask GRP (%u).\n", rx_data); // Got wwrong Package
-						vTaskDelay(500);
-					}
-			}
+	while(1){
+		if(xQueuePeek(xQueue_POT, &POT, (TickType_t) 1000) == pdPASS){
+			printf("Traffic_Generator_Task: %d\n", POT);
+			vTaskDelay(pdMS_TO_TICKS(100));
 		}
-	}*/
-
-	//Reset(Clear) -> output = 0000
-	GPIO_ResetBits(GPIOC, Shift_Register_Reset);
-	for (int i = 0; i<10; i++);
-	GPIO_SetBits(GPIOC, Shift_Register_Reset);
-
-	//Insert L + Shift -> output = 0000
-	GPIO_ResetBits(GPIOC, Shift_Register_Data);
-	GPIO_ResetBits(GPIOC, Shift_Register_Clock);
-	for (int i = 0; i<5; i++);
-	GPIO_SetBits(GPIOC, Shift_Register_Clock);
-
-	//Insert H + Shift -> output = 1000
-	GPIO_SetBits(GPIOC, Shift_Register_Data);
-	GPIO_ResetBits(GPIOC, Shift_Register_Clock);
-	for (int i = 0; i<5; i++);
-	GPIO_SetBits(GPIOC, Shift_Register_Clock);
-	GPIO_ResetBits(GPIOC, Shift_Register_Data);
-
+	}
 }
 
 
+void Traffic_Light_State_Task( void *pvParameters ){
+	xTimerStart(xGreen_Light, 0);
+	xQueueOverwrite(xQueue_Lights_Status, &Green_Light);
 
-/*-----------------------------------------------------------*/
+	/*
+	while(1){
+		vTaskDelay(pdMS_TO_TICKS(100));
+	}
+	*/
+}
+
+void System_Display_Task( void *pvParameters ){
+
+}
+
+void vGreenLightCallBack( TimerHandle_t xTimer ){
+	xTimerStart(xYellow_Light, 0);
+	xQueueOverwrite(xQueue_Lights_Status, &Yellow_Light);
+}
+
+void vYellowLightCallBack( TimerHandle_t xTimer ){
+	int POT = 0;
+
+	if(xQueuePeek(xQueue_POT, &POT, (TickType_t) 1000) == pdPASS){
+		xTimerChangePeriod(xRed_Light, ceil(3 - (POT/MAX_POT)*2), 0);
+		xQueueOverwrite(xQueue_Lights_Status, &Red_Light);
+	}
+}
+
+void vRedLightCallBack( TimerHandle_t xTimer ){
+	int POT = 0;
+
+	if(xQueuePeek(xQueue_POT, &POT, (TickType_t) 1000) == pdPASS){
+		xTimerChangePeriod(xGreen_Light, ceil(3 + (POT/MAX_POT)*2), 0);
+		xQueueOverwrite(xQueue_Lights_Status, &Green_Light);
+	}
+}
 
 /*-----------------------------------------------------------*/
 
