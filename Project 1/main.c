@@ -13,6 +13,7 @@
 
 /*-----------------------------------------------------------*/
 #define MAX_POT 4095
+#define UNIT_TIME 1000
 
 uint32_t Green_Light = GPIO_Pin_2;
 uint32_t Yellow_Light = GPIO_Pin_1;
@@ -54,11 +55,6 @@ void set_high(uint32_t Shift_Register_Data, uint32_t Shift_Register_Clock) {
 	GPIO_ResetBits(GPIOC, Shift_Register_Data);
 }
 
-void led_reset(uint32_t Shift_Register_Reset) {
-	GPIO_ResetBits(GPIOC, Shift_Register_Reset);
-	GPIO_SetBits(GPIOC, Shift_Register_Reset);
-}
-
 void array_to_led(int car_pattern[19]) {
 	for(int i = 18; i >= 0; i--){
 		if(car_pattern[i] == 1)
@@ -84,16 +80,10 @@ int main(void)
 	xQueue_Traffic_Generated = xQueueCreate(1, sizeof(uint16_t));
 	xQueue_Lights_Status = xQueueCreate(1, sizeof(uint32_t));
 
-	/*
-	led_reset(Shift_Register_Reset);
-	int pattern[] = {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
-	array_to_led(pattern);
-	led_reset(Shift_Register_Reset);
-	*/
-
 	xTaskCreate(Traffic_Flow_Adjustment_Task, "Traffic_Flow_Adjustment_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 	xTaskCreate(Traffic_Generator_Task, "Traffic_Generator_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 	xTaskCreate(Traffic_Light_State_Task, "Traffic_Light_State_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+	xTaskCreate(System_Display_Task, "System_Display_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 	xGreen_Light = xTimerCreate("Green_Light_Timer", pdMS_TO_TICKS(2000), pdFALSE, (void *) 0, vGreenLightCallBack);
 	xYellow_Light = xTimerCreate("Yellow_Light_Timer", pdMS_TO_TICKS(1000), pdFALSE, (void *) 0, vYellowLightCallBack);
 	xRed_Light = xTimerCreate("Red_Light_Timer", pdMS_TO_TICKS(2000), pdFALSE, (void *) 0, vRedLightCallBack);
@@ -158,27 +148,40 @@ static uint16_t ADC_Start_Conversion()
 	return converted_data;
 }
 
+void shift_about_stop(int generated_cars[20]){
+	for(int i = 8; i > 0; i--){
+		if(generated_cars[i] == 0){
+			generated_cars[i] = generated_cars[i-1];
+			generated_cars[i-1] = 0;
+		}
+	}
+
+	for(int i = 19; i > 9; i--){
+		generated_cars[i] = generated_cars[i-1];
+		generated_cars[i-1] = 0;
+	}
+}
 
 /*-----------------------------------------------------------*/
 void Traffic_Flow_Adjustment_Task( void *pvParameters ){
 	int POT = 0;
-
 	while(1){
 		POT = ADC_Start_Conversion();
+		printf("POT: %d \n", POT);
 		if(xQueueOverwrite(xQueue_POT, &POT) == pdPASS){
-			printf("Traffic_Flow_Adjustment_Task: %d\n", POT);
-			vTaskDelay(pdMS_TO_TICKS(100));
+			vTaskDelay(pdMS_TO_TICKS(UNIT_TIME));
 		}
 	}
 }
 
 void Traffic_Generator_Task( void *pvParameters ){
 	int POT = 0;
+	int generated_car = 1;
 
 	while(1){
 		if(xQueuePeek(xQueue_POT, &POT, (TickType_t) 1000) == pdPASS){
-			printf("Traffic_Generator_Task: %d\n", POT);
-			vTaskDelay(pdMS_TO_TICKS(100));
+			xQueueOverwrite(xQueue_Traffic_Generated, &generated_car);
+			vTaskDelay(pdMS_TO_TICKS((int)ceil(12*((double)(MAX_POT-POT)/MAX_POT))*UNIT_TIME));
 		}
 	}
 }
@@ -188,15 +191,40 @@ void Traffic_Light_State_Task( void *pvParameters ){
 	xTimerStart(xGreen_Light, 0);
 	xQueueOverwrite(xQueue_Lights_Status, &Green_Light);
 
-	/*
 	while(1){
-		vTaskDelay(pdMS_TO_TICKS(100));
+		vTaskDelay(pdMS_TO_TICKS(UNIT_TIME));
 	}
-	*/
 }
 
 void System_Display_Task( void *pvParameters ){
+	uint32_t current_light;
+	uint16_t generated_car;
+	int generated_cars[20] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
+	GPIO_SetBits(GPIOC, Shift_Register_Reset);
+	while(1){
+		if(xQueuePeek(xQueue_Lights_Status, &current_light, (TickType_t) 1000) == pdPASS){
+			GPIO_ResetBits(GPIOC, Green_Light);
+			GPIO_ResetBits(GPIOC, Yellow_Light);
+			GPIO_ResetBits(GPIOC, Red_Light);
+			GPIO_SetBits(GPIOC, current_light);
+		}
+
+		array_to_led(generated_cars);
+
+		if(current_light == Green_Light){
+			for(int i = 19; i > 0; i--) generated_cars[i] = generated_cars[i-1];
+		}else{
+			shift_about_stop(generated_cars);
+		}
+
+		generated_cars[0] = 0;
+		if((xQueueReceive(xQueue_Traffic_Generated, &generated_car, (TickType_t) 1000) == pdPASS) && (generated_car == 1)){
+			generated_cars[0] = 1;
+		}
+
+		vTaskDelay(pdMS_TO_TICKS(UNIT_TIME));
+	}
 }
 
 void vGreenLightCallBack( TimerHandle_t xTimer ){
@@ -208,7 +236,7 @@ void vYellowLightCallBack( TimerHandle_t xTimer ){
 	int POT = 0;
 
 	if(xQueuePeek(xQueue_POT, &POT, (TickType_t) 1000) == pdPASS){
-		xTimerChangePeriod(xRed_Light, ceil(3 - (POT/MAX_POT)*2), 0);
+		xTimerChangePeriod(xRed_Light, pdMS_TO_TICKS((int)ceil(8*((double)(MAX_POT-POT)/MAX_POT))*UNIT_TIME), 0);
 		xQueueOverwrite(xQueue_Lights_Status, &Red_Light);
 	}
 }
@@ -217,7 +245,7 @@ void vRedLightCallBack( TimerHandle_t xTimer ){
 	int POT = 0;
 
 	if(xQueuePeek(xQueue_POT, &POT, (TickType_t) 1000) == pdPASS){
-		xTimerChangePeriod(xGreen_Light, ceil(3 + (POT/MAX_POT)*2), 0);
+		xTimerChangePeriod(xGreen_Light, pdMS_TO_TICKS((int)ceil((double)POT/MAX_POT*8)*UNIT_TIME), 0);
 		xQueueOverwrite(xQueue_Lights_Status, &Green_Light);
 	}
 }
