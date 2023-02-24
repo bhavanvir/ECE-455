@@ -94,8 +94,6 @@ int main(void)
 	for(;;);
 }
 
-
-
 static void GPIO_Init_C (void)
 {
 	GPIO_InitTypeDef  GPIO_InitStructure;
