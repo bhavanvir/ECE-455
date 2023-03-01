@@ -66,6 +66,7 @@ void array_to_led(int car_pattern[19]) {
 
 int main(void)
 {
+
 	prvSetupHardware();
 
 	/* Enable the GPIO Clock */
@@ -210,11 +211,10 @@ void System_Display_Task( void *pvParameters ){
 
 		array_to_led(generated_cars);
 
-		if(current_light == Green_Light){
+		if(current_light == Green_Light)
 			for(int i = 19; i > 0; i--) generated_cars[i] = generated_cars[i-1];
-		}else{
+		else
 			shift_about_stop(generated_cars);
-		}
 
 		generated_cars[0] = 0;
 		if((xQueueReceive(xQueue_Traffic_Generated, &generated_car, (TickType_t) 1000) == pdPASS) && (generated_car == 1)){
@@ -226,7 +226,8 @@ void System_Display_Task( void *pvParameters ){
 }
 
 void vGreenLightCallBack( TimerHandle_t xTimer ){
-	xTimerStart(xYellow_Light, 0);
+	xTimerStart(xYellow_Light, UNIT_TIME);
+	printf("xYellow_Light: %d\n", UNIT_TIME);
 	xQueueOverwrite(xQueue_Lights_Status, &Yellow_Light);
 }
 
@@ -235,6 +236,7 @@ void vYellowLightCallBack( TimerHandle_t xTimer ){
 
 	if(xQueuePeek(xQueue_POT, &POT, (TickType_t) 1000) == pdPASS){
 		xTimerChangePeriod(xRed_Light, pdMS_TO_TICKS((int)ceil(8*((double)(MAX_POT-POT)/MAX_POT))*UNIT_TIME), 0);
+		printf("xRed_Light: %d\n", (int)ceil(8*((double)(MAX_POT-POT)/MAX_POT))*UNIT_TIME);
 		xQueueOverwrite(xQueue_Lights_Status, &Red_Light);
 	}
 }
@@ -244,6 +246,7 @@ void vRedLightCallBack( TimerHandle_t xTimer ){
 
 	if(xQueuePeek(xQueue_POT, &POT, (TickType_t) 1000) == pdPASS){
 		xTimerChangePeriod(xGreen_Light, pdMS_TO_TICKS((int)ceil((double)POT/MAX_POT*8)*UNIT_TIME), 0);
+		printf("xGreen_Light: %d\n", (int)ceil((double)POT/MAX_POT*8)*UNIT_TIME);
 		xQueueOverwrite(xQueue_Lights_Status, &Green_Light);
 	}
 }
