@@ -175,11 +175,11 @@ void Traffic_Flow_Adjustment_Task( void *pvParameters ){
 
 void Traffic_Generator_Task( void *pvParameters ){
 	int POT = 0;
-	int generated_car = 1;
+	int generate_flag = 1;
 
 	while(1){
 		if(xQueuePeek(xQueue_POT, &POT, (TickType_t) 1000) == pdPASS){
-			xQueueOverwrite(xQueue_Traffic_Generated, &generated_car);
+			xQueueOverwrite(xQueue_Traffic_Generated, &generate_flag);
 			vTaskDelay(pdMS_TO_TICKS((int)ceil(12*((double)(MAX_POT-POT)/MAX_POT))*UNIT_TIME));
 		}
 	}
@@ -190,14 +190,12 @@ void Traffic_Light_State_Task( void *pvParameters ){
 	xTimerStart(xGreen_Light, 0);
 	xQueueOverwrite(xQueue_Lights_Status, &Green_Light);
 
-	while(1){
-		vTaskDelay(pdMS_TO_TICKS(UNIT_TIME));
-	}
+	while(1) vTaskDelay(pdMS_TO_TICKS(UNIT_TIME));
 }
 
 void System_Display_Task( void *pvParameters ){
 	uint32_t current_light;
-	uint16_t generated_car;
+	uint16_t generate_flag;
 	int generated_cars[20] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 	GPIO_SetBits(GPIOC, Shift_Register_Reset);
@@ -217,9 +215,8 @@ void System_Display_Task( void *pvParameters ){
 			shift_about_stop(generated_cars);
 
 		generated_cars[0] = 0;
-		if((xQueueReceive(xQueue_Traffic_Generated, &generated_car, (TickType_t) 1000) == pdPASS) && (generated_car == 1)){
+		if((xQueueReceive(xQueue_Traffic_Generated, &generate_flag, (TickType_t) 1000) == pdPASS) && (generate_flag == 1))
 			generated_cars[0] = 1;
-		}
 
 		vTaskDelay(pdMS_TO_TICKS(UNIT_TIME));
 	}
