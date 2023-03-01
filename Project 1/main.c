@@ -148,13 +148,16 @@ static uint16_t ADC_Start_Conversion()
 }
 
 void shift_about_stop(int generated_cars[20]){
+	// Index 8 represents the stop line, where indices 0-7 represent possible locations for cars to be in
 	for(int i = 8; i > 0; i--){
+		// If we currently have no car in the designated index, we continue shifting until the current LED is on
 		if(generated_cars[i] == 0){
 			generated_cars[i] = generated_cars[i-1];
 			generated_cars[i-1] = 0;
 		}
 	}
 
+	// Index 9 represents the first index after the stop line, and we continue shifting after 9 up through 19
 	for(int i = 19; i > 9; i--){
 		generated_cars[i] = generated_cars[i-1];
 		generated_cars[i-1] = 0;
@@ -162,6 +165,9 @@ void shift_about_stop(int generated_cars[20]){
 }
 
 /*-----------------------------------------------------------*/
+/*
+ * The task runs periodically, at period of one second, to check the value of potentiometer and send it to the queue.
+ */
 void Traffic_Flow_Adjustment_Task( void *pvParameters ){
 	int POT = 0;
 	while(1){
@@ -173,10 +179,15 @@ void Traffic_Flow_Adjustment_Task( void *pvParameters ){
 	}
 }
 
+/*
+ * The task set the traffic_generated_queue to 1 to signal the creation of new car at a specific period.
+ * The period of generation changes according to the value of potentiometer as read from the queue.
+ */
 void Traffic_Generator_Task( void *pvParameters ){
 	int POT = 0;
 	int generate_flag = 1;
 
+	// The period equation was built with a factor of 12 which was reached through trial and error by monitoring LED traffic spread
 	while(1){
 		if(xQueuePeek(xQueue_POT, &POT, (TickType_t) 1000) == pdPASS){
 			xQueueOverwrite(xQueue_Traffic_Generated, &generate_flag);
@@ -185,7 +196,10 @@ void Traffic_Generator_Task( void *pvParameters ){
 	}
 }
 
-
+/*
+ * Initiates a series of callbacks to update the traffic lights in the right order and the right periods according to the potentiometer values.
+ * We start by starting the first traffic light in our chain, the green light.
+ */
 void Traffic_Light_State_Task( void *pvParameters ){
 	xTimerStart(xGreen_Light, 0);
 	xQueueOverwrite(xQueue_Lights_Status, &Green_Light);
@@ -196,25 +210,35 @@ void Traffic_Light_State_Task( void *pvParameters ){
 void System_Display_Task( void *pvParameters ){
 	uint32_t current_light;
 	uint16_t generate_flag;
+	// Initialize a 20 wide array representing all car LEDs
 	int generated_cars[20] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
+	// Reset the Shift Register for the current run
 	GPIO_SetBits(GPIOC, Shift_Register_Reset);
 	while(1){
+		// Get the current traffic light to be turned on
 		if(xQueuePeek(xQueue_Lights_Status, &current_light, (TickType_t) 1000) == pdPASS){
+			// Turn off all traffic lights
 			GPIO_ResetBits(GPIOC, Green_Light);
 			GPIO_ResetBits(GPIOC, Yellow_Light);
 			GPIO_ResetBits(GPIOC, Red_Light);
+			// Turn the current traffic light on
 			GPIO_SetBits(GPIOC, current_light);
 		}
 
+		// Given the generated_cars array, turn on each LED represented by a "1" and vice versa
 		array_to_led(generated_cars);
 
+		// If the current light is green, continue shifting cars forward
 		if(current_light == Green_Light)
 			for(int i = 19; i > 0; i--) generated_cars[i] = generated_cars[i-1];
 		else
+			// If the current light is yellow or red, shift cars behind and after the stop line forwards
 			shift_about_stop(generated_cars);
 
+		// Always set the first LED to off, to anticipate the next run
 		generated_cars[0] = 0;
+		// Get the generate flag value, and set first LED accordingly
 		if((xQueueReceive(xQueue_Traffic_Generated, &generate_flag, (TickType_t) 1000) == pdPASS) && (generate_flag == 1))
 			generated_cars[0] = 1;
 
@@ -222,12 +246,20 @@ void System_Display_Task( void *pvParameters ){
 	}
 }
 
+/*
+ * We continue running through our chain, by running the yellow light after we have called our green light.
+ * We start the yellow light and have it running for a constant period of UNIT_TIME, which represents 1 second.
+ */
 void vGreenLightCallBack( TimerHandle_t xTimer ){
 	xTimerStart(xYellow_Light, UNIT_TIME);
 	printf("xYellow_Light: %d\n", UNIT_TIME);
 	xQueueOverwrite(xQueue_Lights_Status, &Yellow_Light);
 }
 
+/*
+ * With low a potentiometer value read from the xQueue_POT queue, the period for red increases, with a maximum period of 8
+ * seconds and minimum of 1 second. This function sets the flag to the next light in the chain, in this case being red.
+ */
 void vYellowLightCallBack( TimerHandle_t xTimer ){
 	int POT = 0;
 
@@ -238,6 +270,11 @@ void vYellowLightCallBack( TimerHandle_t xTimer ){
 	}
 }
 
+/*
+ * With low a potentiometer value read from the xQueue_POT queue, the period for green increases, with a maximum period of 8
+ * seconds and minimum of 1 second. This function sets the flag to the next light in the chain, in this case being green, to
+ * restart the cycle once again.
+ */
 void vRedLightCallBack( TimerHandle_t xTimer ){
 	int POT = 0;
 
