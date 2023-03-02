@@ -188,7 +188,7 @@ void Traffic_Generator_Task( void *pvParameters ){
 
 	// The period equation was built with a factor of 12 which was reached through trial and error by monitoring LED traffic spread
 	while(1){
-		if(xQueuePeek(xQueue_POT, &POT, (TickType_t) 1000) == pdPASS){
+		if(xQueuePeek(xQueue_POT, &POT, (TickType_t) UNIT_TIME) == pdPASS){
 			xQueueOverwrite(xQueue_Traffic_Generated, &generate_flag);
 			vTaskDelay(pdMS_TO_TICKS((int)ceil(12*((double)(MAX_POT-POT)/MAX_POT))*UNIT_TIME));
 		}
@@ -216,7 +216,7 @@ void System_Display_Task( void *pvParameters ){
 	GPIO_SetBits(GPIOC, Shift_Register_Reset);
 	while(1){
 		// Get the current traffic light to be turned on
-		if(xQueuePeek(xQueue_Lights_Status, &current_light, (TickType_t) 1000) == pdPASS){
+		if(xQueuePeek(xQueue_Lights_Status, &current_light, (TickType_t) UNIT_TIME) == pdPASS){
 			// Turn off all traffic lights
 			GPIO_ResetBits(GPIOC, Green_Light);
 			GPIO_ResetBits(GPIOC, Yellow_Light);
@@ -238,7 +238,7 @@ void System_Display_Task( void *pvParameters ){
 		// Always set the first LED to off, to anticipate the next run
 		generated_cars[0] = 0;
 		// Get the generate flag value, and set first LED accordingly
-		if((xQueueReceive(xQueue_Traffic_Generated, &generate_flag, (TickType_t) 1000) == pdPASS) && (generate_flag == 1))
+		if((xQueueReceive(xQueue_Traffic_Generated, &generate_flag, (TickType_t) UNIT_TIME) == pdPASS) && (generate_flag == 1))
 			generated_cars[0] = 1;
 
 		vTaskDelay(pdMS_TO_TICKS(UNIT_TIME));
@@ -262,7 +262,7 @@ void vGreenLightCallBack( TimerHandle_t xTimer ){
 void vYellowLightCallBack( TimerHandle_t xTimer ){
 	int POT = 0;
 
-	if(xQueuePeek(xQueue_POT, &POT, (TickType_t) 1000) == pdPASS){
+	if(xQueuePeek(xQueue_POT, &POT, (TickType_t) UNIT_TIME) == pdPASS){
 		xTimerChangePeriod(xRed_Light, pdMS_TO_TICKS((int)ceil(8*((double)(MAX_POT-POT)/MAX_POT))*UNIT_TIME), 0);
 		printf("xRed_Light: %d\n", (int)ceil(8*((double)(MAX_POT-POT)/MAX_POT))*UNIT_TIME);
 		xQueueOverwrite(xQueue_Lights_Status, &Red_Light);
@@ -277,7 +277,7 @@ void vYellowLightCallBack( TimerHandle_t xTimer ){
 void vRedLightCallBack( TimerHandle_t xTimer ){
 	int POT = 0;
 
-	if(xQueuePeek(xQueue_POT, &POT, (TickType_t) 1000) == pdPASS){
+	if(xQueuePeek(xQueue_POT, &POT, (TickType_t) UNIT_TIME) == pdPASS){
 		xTimerChangePeriod(xGreen_Light, pdMS_TO_TICKS((int)ceil((double)POT/MAX_POT*8)*UNIT_TIME), 0);
 		printf("xGreen_Light: %d\n", (int)ceil((double)POT/MAX_POT*8)*UNIT_TIME);
 		xQueueOverwrite(xQueue_Lights_Status, &Green_Light);
