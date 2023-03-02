@@ -55,9 +55,9 @@ void set_high(uint32_t Shift_Register_Data, uint32_t Shift_Register_Clock) {
 	GPIO_ResetBits(GPIOC, Shift_Register_Data);
 }
 
-void array_to_led(int car_pattern[19]) {
+void array_to_led(int generated_cars[19]) {
 	for(int i = 18; i >= 0; i--){
-		if(car_pattern[i] == 1)
+		if(generated_cars[i] == 1)
 			set_high(Shift_Register_Data, Shift_Register_Clock);
 		else
 			set_low(Shift_Register_Data, Shift_Register_Clock);
@@ -66,7 +66,6 @@ void array_to_led(int car_pattern[19]) {
 
 int main(void)
 {
-
 	prvSetupHardware();
 
 	/* Enable the GPIO Clock */
@@ -226,7 +225,7 @@ void System_Display_Task( void *pvParameters ){
 			GPIO_SetBits(GPIOC, current_light);
 		}
 
-		// Given the generated_cars array, turn on each LED represented by a "1" and vice versa
+		// Given the generated_cars array, turn on each LED represented by a 1 and vice versa
 		array_to_led(generated_cars);
 
 		// If the current light is green, continue shifting cars forward
@@ -343,7 +342,4 @@ static void prvSetupHardware( void )
 	/* Ensure all priority bits are assigned as preemption priority bits.
 	http://www.freertos.org/RTOS-Cortex-M3-M4.html */
 	NVIC_SetPriorityGrouping( 0 );
-
-	/* TODO: Setup the clocks, etc. here, if they were not configured before
-	main() was called. */
 }
