@@ -84,9 +84,9 @@ int main(void)
 	xTaskCreate(Traffic_Generator_Task, "Traffic_Generator_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 	xTaskCreate(Traffic_Light_State_Task, "Traffic_Light_State_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 	xTaskCreate(System_Display_Task, "System_Display_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-	xGreen_Light = xTimerCreate("Green_Light_Timer", pdMS_TO_TICKS(2000), pdFALSE, (void *) 0, vGreenLightCallBack);
-	xYellow_Light = xTimerCreate("Yellow_Light_Timer", pdMS_TO_TICKS(1000), pdFALSE, (void *) 0, vYellowLightCallBack);
-	xRed_Light = xTimerCreate("Red_Light_Timer", pdMS_TO_TICKS(2000), pdFALSE, (void *) 0, vRedLightCallBack);
+	xGreen_Light = xTimerCreate("Green_Light_Timer", pdMS_TO_TICKS(2*UNIT_TIME), pdFALSE, (void *) 0, vGreenLightCallBack);
+	xYellow_Light = xTimerCreate("Yellow_Light_Timer", pdMS_TO_TICKS(UNIT_TIME), pdFALSE, (void *) 0, vYellowLightCallBack);
+	xRed_Light = xTimerCreate("Red_Light_Timer", pdMS_TO_TICKS(2*UNIT_TIME), pdFALSE, (void *) 0, vRedLightCallBack);
 	/* Start the tasks and timer running. */
 	vTaskStartScheduler();
 
