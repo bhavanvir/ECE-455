@@ -172,9 +172,8 @@ void Traffic_Flow_Adjustment_Task( void *pvParameters ){
 	while(1){
 		POT = ADC_Start_Conversion();
 		printf("POT: %d \n", POT);
-		if(xQueueOverwrite(xQueue_POT, &POT) == pdPASS){
+		if(xQueueOverwrite(xQueue_POT, &POT) == pdPASS)
 			vTaskDelay(pdMS_TO_TICKS(UNIT_TIME));
-		}
 	}
 }
 
