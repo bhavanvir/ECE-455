@@ -34,7 +34,6 @@ TaskHandle_t xHandlers[3];
 enum task_type {PERIODIC = 0, APERIODIC = 1};
 
 typedef struct {
-	//TaskHandle_t *t_handle;
 	enum task_type type;
 	uint32_t task_id;
 	uint32_t release_time;
@@ -49,7 +48,6 @@ typedef struct {
 } dd_task_list;
 
 typedef struct {
-	//TaskHandle_t *t_handle;
 	uint32_t execution_time;
 	uint32_t period;
 	uint32_t task_id;
@@ -90,25 +88,23 @@ int main(void)
 	xHandlers[2] = xHandlerTask3;
 
 	// Task 1
-	//task_parameters[0].t_handle = &xHandlerTask1;
 	task_parameters[0].execution_time = 95;
 	task_parameters[0].period = 500;
 	task_parameters[0].task_id = 0;
 	task_parameters[0].type = PERIODIC;
 	// Task 2
-	//task_parameters[1].t_handle = &xHandlerTask2;
 	task_parameters[1].execution_time = 150;
 	task_parameters[1].period = 500;
 	task_parameters[1].task_id = 1;
 	task_parameters[1].type = PERIODIC;
 	// Task 3
-	//task_parameters[2].t_handle = &xHandlerTask3;
 	task_parameters[2].execution_time = 250;
 	task_parameters[2].period = 500;
 	task_parameters[2].task_id = 2;
 	task_parameters[2].type = PERIODIC;
 
 	xQueue_To_Add = xQueueCreate(3, sizeof(dd_task));
+	xQueue_To_Remove = xQueueCreate(3, sizeof(uint32_t));
 
 	xTaskCreate(Deadline_Driven_Task_Generator, "Deadline-Driven Task Generator", configMINIMAL_STACK_SIZE, task_parameters, 1, NULL);
 	xTaskCreate(Deadline_Driven_Scheduler, "Deadline Driven Scheduler", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
@@ -136,13 +132,6 @@ void create_dd_task(enum task_type type, uint32_t task_id, uint32_t absolute_dea
 	task->execution_time = execution_time;
 
 	xQueueSend(xQueue_To_Add, &task, (TickType_t) UNIT_TIME);
-}
-
-void delete_dd_task(uint32_t task_id){
-	printf("IN delete_dd_task WITH TASK ID: %u\n", task_id);
-	//printf("delete_dd_task: Task with ID %u was removed", task_id);
-	//xQueueSend(xQueue_To_Remove, &task_id, (TickType_t) UNIT_TIME);
-	//write_to_queue(task_id, &xQueue_To_Remove)
 }
 
 void count_dd_list(dd_task_list task){
@@ -196,17 +185,24 @@ void Deadline_Driven_Scheduler(void *pvParameters){
 	dd_task_list complete_dd_task_list;
 	dd_task_list overdue_dd_task_list;
 	dd_task *task;
+	int task_id_to_remove;
 
 	for(;;){
 		// Create tasks
-		while(xQueueReceive(xQueue_To_Add, &task, 0) == pdTRUE)
-			xTaskCreate(Template_Task, "Task", configMINIMAL_STACK_SIZE, task, 1, xHandlers[task->task_id]);
+		while(xQueueReceive(xQueue_To_Add, &task, 0) == pdTRUE){
+			char task_name[20];
+			sprintf(task_name, "Task %u", task->task_id+1);
+			xTaskCreate(Template_Task, task_name, configMINIMAL_STACK_SIZE, task, 1, xHandlers[task->task_id]);
+		}
 
-		//check_handle_tasks_to_remove_queue();
+		// Delete tasks
+		while(xQueueReceive(xQueue_To_Remove, &task_id_to_remove, 0) == pdTRUE){
+			vTaskSuspend(xHandlers[task_id_to_remove]);
+			vTaskDelete(xHandlers[task_id_to_remove]);
 
-		//check_handle_get_request_queue(active_dd_task_list, complete_dd_task_list, overdue_dd_task_list);
+		}
 
-		vTaskDelay(pdMS_TO_TICKS(UNIT_TIME*10));
+		vTaskDelay(pdMS_TO_TICKS(UNIT_TIME));
 	}
 }
 
@@ -229,12 +225,12 @@ void Deadline_Driven_Task_Generator(void *pvParameters){
 void Template_Task(void *pvParameters){
 	dd_task *task = (dd_task *)pvParameters;
 
+	//printf("Template_Task: CREATED TASK %u\n", task->task_id+1);
 	TimerHandle_t xDD_Task_Timer = xTimerCreate("DD Task Timer", pdMS_TO_TICKS(task->execution_time), pdFALSE, (void *)task, vTemplateTaskCallback);
 	xTimerStart(xDD_Task_Timer, pdMS_TO_TICKS(task->execution_time));
 	for(;;){
 		vTaskDelay(pdMS_TO_TICKS(UNIT_TIME));
 	}
-
 }
 
 /*-----------------------------------------------------------*/
@@ -245,8 +241,9 @@ void vTemplateTaskCallback(TimerHandle_t xTimer){
 	dd_task *task = (dd_task *)pvTimerID;
 
 	task->completion_time = current_time - task->release_time;
-	delete_dd_task(task->task_id);
-	//xQueueSend(xQueue_To_Remove, task, (TickType_t) UNIT_TIME);
+	//printf("vTemplateTaskCallback: %u\n", task->completion_time);
+	//printf("delete_dd_task: DELETED TASK %u\n", task->task_id+1);
+	xQueueSend(xQueue_To_Remove, &task->task_id, (TickType_t) UNIT_TIME);
 }
 
 /*-----------------------------------------------------------*/
