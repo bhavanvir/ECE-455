@@ -38,6 +38,7 @@ typedef struct {
 	uint32_t release_time;
 	uint32_t absolute_deadline;
 	uint32_t completion_time;
+	uint32_t execution_time;
 } dd_task;
 
 typedef struct {
@@ -46,10 +47,10 @@ typedef struct {
 } dd_task_list;
 
 typedef struct {
-	int execution_time;
-	int period;
-	int task_id;
-	int type;
+	uint32_t execution_time;
+	uint32_t period;
+	uint32_t task_id;
+	uint32_t type;
 } dd_task_parameters;
 
 /*
@@ -57,7 +58,7 @@ typedef struct {
  * that was not already performed before main() was called.
  */
 static void prvSetupHardware( void );
-void create_dd_task(TaskHandle_t t_handle, enum task_type type, uint32_t task_id, uint32_t absolute_deadline);
+void create_dd_task(TaskHandle_t t_handle, enum task_type type, uint32_t task_id, uint32_t absolute_deadline, uint32_t execution_time);
 void delete_dd_task(uint32_t task_id);
 dd_task_list** get_active_dd_task_list(void);
 dd_task_list** get_complete_dd_task_list(void);
@@ -110,7 +111,7 @@ int main(void)
 
 /*-----------------------------------------------------------*/
 
-void create_dd_task(TaskHandle_t handle, enum task_type type, uint32_t task_id, uint32_t absolute_deadline){
+void create_dd_task(TaskHandle_t handle, enum task_type type, uint32_t task_id, uint32_t absolute_deadline, uint32_t execution_time){
 	dd_task *task = (dd_task*)pvPortMalloc(sizeof(dd_task));
 	task->t_handle = handle;
 	task->type = type;
@@ -118,29 +119,92 @@ void create_dd_task(TaskHandle_t handle, enum task_type type, uint32_t task_id, 
 	task->release_time = 0;
 	task->absolute_deadline = absolute_deadline;
 	task->completion_time = 0;
+	task->execution_time = execution_time;
+
+	//write_to_queue(task ,&xQueue_To_Add)
 
 }
 
 void delete_dd_task(uint32_t task_id){
+	//write_to_queue(task_id, &xQueue_To_Remove)
+}
+
+void count_dd_list(dd_task_list task){
 
 }
 
-dd_task_list** get_active_dd_task_list(void){
+int get_active_dd_task_list(void){
+	dd_task_list** active_dd_list;
 
+	//write_to_queue(task_id, &xQueue_Active_DD_List_Request);
+
+	//while(read_from_queue(xQueue_Active_DD_List_Response, &active_dd_list) != pdPASS);
+
+	return active_dd_list;
 }
 
-dd_task_list** get_complete_dd_task_list(void){
-
+int get_complete_dd_task_list(void){
+	//same as previous function
 }
 
-dd_task_list** get_overdue_dd_task_list(void){
-
+int get_overdue_dd_task_list(void){
+	//same as previous function
 }
 
 /*-----------------------------------------------------------*/
 
-void Deadline_Driven_Scheduler(void *pvParameters){
+// Helper functions
 
+/*
+check_handle_get_request_queue(active_dd_task_list, complete_dd_task_list, overdue_dd_task_list){
+	uint32_t active_flag = 0;
+	uint32_t completed_flag = 0;
+	uint32_t overdue_flag = 0;
+
+	if(xQueueReceive(xQueue_Active_DD_List_Request, &active_flag, ( TickType_t ) UNIT_TIME ) == pdPASS)
+		xQueueOverwrite(xQueue_Active_DD_List_Response, count_dd_list(active_dd_task_list));
+
+	if(xQueueReceive(xQueue_Completed_DD_List_Request, &completed_flag, ( TickType_t ) UNIT_TIME ) == pdPASS)
+		xQueueOverwrite(xQueue_Completed_DD_List_Response, count_dd_list(complete_dd_task_list));
+
+	if(xQueueReceive(xQueue_Overdue_DD_List_Request, &overdue_flag, ( TickType_t ) UNIT_TIME ) == pdPASS)
+		xQueueOverwrite(xQueue_Overdue_DD_List_Response, count_dd_list(overdue_dd_task_list));
+}
+*/
+
+/*
+check_handle_tasks_to_add_queue(){
+	dd_task *task;
+
+	// Check and receive tasks_to_add_queue
+	if(xQueueReceive(xQueue_To_Add, &task, ( TickType_t ) UNIT_TIME ) == pdPASS){
+		xTaskCreate(Template_Task, "Task", configMINIMAL_STACK_SIZE, task, 1, task->t_handle);
+	}
+}
+*/
+
+/*
+check_handle_tasks_to_remove_queue(){
+
+}
+*/
+
+/*-----------------------------------------------------------*/
+
+void Deadline_Driven_Scheduler(void *pvParameters){
+	dd_task_list active_dd_task_list;
+	dd_task_list complete_dd_task_list;
+	dd_task_list overdue_dd_task_list;
+
+	for(;;){
+		//check_handle_tasks_to_add_queue();
+
+		//check_handle_tasks_to_remove_queue();
+
+		//check_handle_get_request_queue(active_dd_task_list, complete_dd_task_list, overdue_dd_task_list);
+
+		//delay(TIME);
+	}
 }
 
 void Deadline_Driven_Task_Generator(void *pvParameters){
@@ -149,12 +213,29 @@ void Deadline_Driven_Task_Generator(void *pvParameters){
 	int i = 0;
 	for(;;){
 		TaskHandle_t *t_handle;
-		create_dd_task(t_handle, task_parameters[i%3].type, task_parameters[i%3].task_id, task_parameters[i%3].period);
+		create_dd_task(
+					   t_handle,
+				       task_parameters[i%3].type,
+					   task_parameters[i%3].task_id,
+					   task_parameters[i%3].period,
+					   task_parameters[i%3].execution_time
+					   );
 		i++;
+
+		//delay(TIME);
 	}
 }
 
 void Template_Task(void *pvParameters){
+	dd_task *task = (dd_task*)pvParameters;
+
+	xDD_Task_Timer = xTimerCreate("DD Task Timer", pdMS_TO_TICKS(task->execution_time), pdFALSE, task->task_id, vTemplateTaskCallback);
+	for(;;);
+}
+
+/*-----------------------------------------------------------*/
+
+void vTemplateTaskCallback(TimerHandle_t xTimer){
 
 }
 
