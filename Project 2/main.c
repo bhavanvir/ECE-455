@@ -66,6 +66,7 @@ dd_task_list** get_overdue_dd_task_list(void);
 void Deadline_Driven_Scheduler(void *pvParameters);
 void Deadline_Driven_Task_Generator(void *pvParameters);
 void check_handle_tasks_to_add_queue(void);
+void check_handle_tasks_to_remove_queue(void);
 void vTemplateTaskCallback(TimerHandle_t xTimer);
 void Template_Task(void *pvParameters);
 void vUniversalTimerCallback(TimerHandle_t xTimer);
@@ -101,7 +102,10 @@ int main(void)
 	xQueueHandle xQueue_Universal_Clock = xQueueCreate(1, sizeof(int));
 	xQueueOverwrite(&xQueue_Universal_Clock, 0);
 
+	printf("I AM HERE: main");
+
 	xTaskCreate(Deadline_Driven_Task_Generator, "Deadline-Driven Task Generator", configMINIMAL_STACK_SIZE, task_parameters, 1, NULL);
+	xTaskCreate(Deadline_Driven_Scheduler, "Deadline Driven Scheduler", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
 	xUniversal_Clock = xTimerCreate("Universal Clock", pdMS_TO_TICKS(UNIT_TIME), pdTRUE, (void *) 0, vUniversalTimerCallback);
 
@@ -132,6 +136,9 @@ void create_dd_task(TaskHandle_t handle, enum task_type type, uint32_t task_id, 
 }
 
 void delete_dd_task(uint32_t task_id){
+	printf("I AM HERE: delete_dd_task\n");
+	//printf("delete_dd_task: Task with ID %u was removed", task_id);
+	//xQueueSend(xQueue_To_Remove, &task_id, (TickType_t) UNIT_TIME);
 	//write_to_queue(task_id, &xQueue_To_Remove)
 }
 
@@ -181,18 +188,18 @@ check_handle_get_request_queue(active_dd_task_list, complete_dd_task_list, overd
 
 void check_handle_tasks_to_add_queue(){
 	dd_task *task;
-
+	printf("I AM HERE: check_handle_tasks_to_add_queue\n");
 	// Check and receive tasks_to_add_queue
 	if(xQueueReceive(xQueue_To_Add, &task, ( TickType_t ) UNIT_TIME ) == pdPASS){
 		xTaskCreate(Template_Task, "Task", configMINIMAL_STACK_SIZE, task, 1, task->t_handle);
 	}
 }
 
-/*
-check_handle_tasks_to_remove_queue(){
+
+void check_handle_tasks_to_remove_queue(){
 
 }
-*/
+
 
 /*-----------------------------------------------------------*/
 
@@ -202,6 +209,7 @@ void Deadline_Driven_Scheduler(void *pvParameters){
 	dd_task_list overdue_dd_task_list;
 
 	for(;;){
+		printf("I AM HERE: Deadline_Driven_Scheduler\n");
 		check_handle_tasks_to_add_queue();
 
 		//check_handle_tasks_to_remove_queue();
@@ -214,7 +222,7 @@ void Deadline_Driven_Scheduler(void *pvParameters){
 
 void Deadline_Driven_Task_Generator(void *pvParameters){
 	dd_task_parameters *task_parameters = (dd_task_parameters*)pvParameters;
-
+	printf("I AM HERE: Deadline_Driven_Task_Generator\n");
 	int i = 0;
 	for(;;){
 		TaskHandle_t *t_handle;
@@ -232,7 +240,7 @@ void Deadline_Driven_Task_Generator(void *pvParameters){
 
 void Template_Task(void *pvParameters){
 	dd_task *task = (dd_task *)pvParameters;
-
+	printf("I AM HERE: Template_Task\n");
 	TimerHandle_t xDD_Task_Timer = xTimerCreate("DD Task Timer", pdMS_TO_TICKS(task->execution_time), pdFALSE, (void *)task, vTemplateTaskCallback);
 	xTimerStart(xDD_Task_Timer, pdMS_TO_TICKS(task->execution_time));
 	for(;;);
@@ -246,9 +254,11 @@ void vTemplateTaskCallback(TimerHandle_t xTimer){
 	void *pvTimerID = pvTimerGetTimerID(xTimer);
 	dd_task *task = (dd_task *)pvTimerID;
 
-	if(xQueuePeek(xQueue_Universal_Clock, &current_time, (TickType_t) UNIT_TIME) == pdPASS)
-		if(current_time-task->release_time > task->absolute_deadline)
-			xQueueSend(xQueue_To_Remove, task, (TickType_t) UNIT_TIME);
+	if(xQueuePeek(xQueue_Universal_Clock, &current_time, (TickType_t) UNIT_TIME) == pdPASS){
+		task->completion_time = current_time - task->release_time;
+		delete_dd_task( task->task_id);
+		//xQueueSend(xQueue_To_Remove, task, (TickType_t) UNIT_TIME);
+	}
 }
 
 void vUniversalTimerCallback(TimerHandle_t xTimer){
