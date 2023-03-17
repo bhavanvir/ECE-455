@@ -29,10 +29,12 @@ TaskHandle_t xHandlerTask1 = NULL;
 TaskHandle_t xHandlerTask2 = NULL;
 TaskHandle_t xHandlerTask3 = NULL;
 
+TaskHandle_t xHandlers[3];
+
 enum task_type {PERIODIC = 0, APERIODIC = 1};
 
 typedef struct {
-	TaskHandle_t t_handle;
+	//TaskHandle_t *t_handle;
 	enum task_type type;
 	uint32_t task_id;
 	uint32_t release_time;
@@ -47,7 +49,7 @@ typedef struct {
 } dd_task_list;
 
 typedef struct {
-	TaskHandle_t t_handle;
+	//TaskHandle_t *t_handle;
 	uint32_t execution_time;
 	uint32_t period;
 	uint32_t task_id;
@@ -59,7 +61,7 @@ typedef struct {
  * that was not already performed before main() was called.
  */
 static void prvSetupHardware(void);
-void create_dd_task(TaskHandle_t t_handle, enum task_type type, uint32_t task_id, uint32_t absolute_deadline, uint32_t execution_time);
+void create_dd_task(enum task_type type, uint32_t task_id, uint32_t absolute_deadline, uint32_t execution_time);
 void delete_dd_task(uint32_t task_id);
 dd_task_list** get_active_dd_task_list(void);
 dd_task_list** get_complete_dd_task_list(void);
@@ -83,23 +85,27 @@ int main(void)
 		printf("Issue allocating memory!\n");
 	}
 
+	xHandlers[0] = xHandlerTask1;
+	xHandlers[1] = xHandlerTask2;
+	xHandlers[2] = xHandlerTask3;
+
 	// Task 1
-	task_parameters[0].t_handle = xHandlerTask1;
+	//task_parameters[0].t_handle = &xHandlerTask1;
 	task_parameters[0].execution_time = 95;
 	task_parameters[0].period = 500;
-	task_parameters[0].task_id = 1;
+	task_parameters[0].task_id = 0;
 	task_parameters[0].type = PERIODIC;
 	// Task 2
-	task_parameters[1].t_handle = xHandlerTask2;
+	//task_parameters[1].t_handle = &xHandlerTask2;
 	task_parameters[1].execution_time = 150;
 	task_parameters[1].period = 500;
-	task_parameters[1].task_id = 2;
+	task_parameters[1].task_id = 1;
 	task_parameters[1].type = PERIODIC;
 	// Task 3
-	task_parameters[2].t_handle = xHandlerTask3;
+	//task_parameters[2].t_handle = &xHandlerTask3;
 	task_parameters[2].execution_time = 250;
 	task_parameters[2].period = 500;
-	task_parameters[2].task_id = 3;
+	task_parameters[2].task_id = 2;
 	task_parameters[2].type = PERIODIC;
 
 	xQueue_To_Add = xQueueCreate(3, sizeof(dd_task));
@@ -117,11 +123,11 @@ int main(void)
 }
 
 /*-----------------------------------------------------------*/
-void create_dd_task(TaskHandle_t handle, enum task_type type, uint32_t task_id, uint32_t absolute_deadline, uint32_t execution_time){
+void create_dd_task(enum task_type type, uint32_t task_id, uint32_t absolute_deadline, uint32_t execution_time){
 	dd_task *task = (dd_task*)pvPortMalloc(sizeof(dd_task));
 	TickType_t current_time = xTaskGetTickCount();
 
-	task->t_handle = handle;
+	//task->t_handle = handle;
 	task->type = type;
 	task->task_id = task_id;
 	task->release_time = current_time;
@@ -133,7 +139,7 @@ void create_dd_task(TaskHandle_t handle, enum task_type type, uint32_t task_id, 
 }
 
 void delete_dd_task(uint32_t task_id){
-	printf("I AM HERE: delete_dd_task\n");
+	printf("IN delete_dd_task WITH TASK ID: %u\n", task_id);
 	//printf("delete_dd_task: Task with ID %u was removed", task_id);
 	//xQueueSend(xQueue_To_Remove, &task_id, (TickType_t) UNIT_TIME);
 	//write_to_queue(task_id, &xQueue_To_Remove)
@@ -183,38 +189,23 @@ check_handle_get_request_queue(active_dd_task_list, complete_dd_task_list, overd
 }
 */
 
-void check_handle_tasks_to_add_queue(){
-	dd_task *task;
-	// Check and receive tasks_to_add_queue
-	//printf("IN: check_handle_tasks_to_add_queue\n");
-	printf("I WAS CALLED\n");
-	if(xQueueReceive(xQueue_To_Add, &task, ( TickType_t ) UNIT_TIME ) == pdPASS){
-		printf("IN: check_handle_tasks_to_add_queue	WITH TASK ID: %u\n", task->task_id);
-		TaskHandle_t xHandle = task->t_handle;
-		xTaskCreate(Template_Task, "Task", configMINIMAL_STACK_SIZE, task, 1, xHandle);
-	}
-	printf("I AM FINISHED\n");
-}
-
-void check_handle_tasks_to_remove_queue(){
-
-}
-
 
 /*-----------------------------------------------------------*/
 void Deadline_Driven_Scheduler(void *pvParameters){
 	dd_task_list active_dd_task_list;
 	dd_task_list complete_dd_task_list;
 	dd_task_list overdue_dd_task_list;
-	//printf("IN: Deadline_Driven_Scheduler\n");
+	dd_task *task;
+
 	for(;;){
-		check_handle_tasks_to_add_queue();
+		// Create tasks
+		while(xQueueReceive(xQueue_To_Add, &task, 0) == pdTRUE)
+			xTaskCreate(Template_Task, "Task", configMINIMAL_STACK_SIZE, task, 1, xHandlers[task->task_id]);
 
 		//check_handle_tasks_to_remove_queue();
 
 		//check_handle_get_request_queue(active_dd_task_list, complete_dd_task_list, overdue_dd_task_list);
 
-		//delay(TIME);
 		vTaskDelay(pdMS_TO_TICKS(UNIT_TIME*10));
 	}
 }
@@ -222,11 +213,10 @@ void Deadline_Driven_Scheduler(void *pvParameters){
 void Deadline_Driven_Task_Generator(void *pvParameters){
 	dd_task_parameters *task_parameters = (dd_task_parameters*)pvParameters;
 	int i = 0;
-	//printf("IN: Deadline_Driven_Task_Generator\n");
+
 	for(;;){
 		create_dd_task(
-					   task_parameters[i%3].t_handle,
-				       task_parameters[i%3].type,
+					   task_parameters[i%3].type,
 					   task_parameters[i%3].task_id,
 					   task_parameters[i%3].period,
 					   task_parameters[i%3].execution_time
@@ -239,20 +229,13 @@ void Deadline_Driven_Task_Generator(void *pvParameters){
 void Template_Task(void *pvParameters){
 	dd_task *task = (dd_task *)pvParameters;
 
-	/*
-	printf("IN: Template_Task\n");
-	printf("	WITH Execution time: %u\n", task->execution_time);
-	printf("	WITH ID: %u", task->task_id);
-	*/
-
-	//TimerHandle_t xDD_Task_Timer = xTimerCreate("DD Task Timer", pdMS_TO_TICKS(task->execution_time), pdFALSE, (void *)task, vTemplateTaskCallback);
-	//xTimerStart(xDD_Task_Timer, pdMS_TO_TICKS(task->execution_time));
+	TimerHandle_t xDD_Task_Timer = xTimerCreate("DD Task Timer", pdMS_TO_TICKS(task->execution_time), pdFALSE, (void *)task, vTemplateTaskCallback);
+	xTimerStart(xDD_Task_Timer, pdMS_TO_TICKS(task->execution_time));
 	for(;;){
 		vTaskDelay(pdMS_TO_TICKS(UNIT_TIME));
 	}
 
 }
-
 
 /*-----------------------------------------------------------*/
 
