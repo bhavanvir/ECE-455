@@ -65,11 +65,14 @@ void vTaskPrintHello(void *pvParameters) {
 
   /* Create task to print "World" */
   xTaskCreate(vTaskPrintWindows, "WindowsTask", configMINIMAL_STACK_SIZE, NULL, tskIDLE_PRIORITY+1, &handlers[0]);
+  printf("Windows task is created for first time! \n");
 
   while(1) {
-    printf("Hello");
-    if(handlers[0] != NULL){
+    printf("Hello\n");
+    if(handlers[0] == NULL){
+    	//printf("Windows task will be created again now! %d\n", handlers[0]==NULL);
     	xTaskCreate(vTaskPrintWindows, "WindowsTask", configMINIMAL_STACK_SIZE, NULL, tskIDLE_PRIORITY+1, &handlers[0]);
+    	printf("Windows task is created again! %d\n", handlers[0]==NULL);
     }
     vTaskDelay(pdMS_TO_TICKS(5000)); /* Delay for 1 second */
   }
@@ -80,12 +83,18 @@ void vTaskPrintWorld(void *pvParameters) {
   TaskHandle_t *handlers = (TaskHandle_t*)pvParameters;
   while(1) {
     printf("World\n");
-    vTaskDelay(pdMS_TO_TICKS(1000)); /* Delay for 1 second */
+
     if(handlers[0] != NULL){
     	vTaskSuspend(handlers[0]);
     	vTaskDelete(handlers[0]);
     	handlers[0] = NULL;
+    	printf("Windows task is deleted \n");
+
+    }else{
+    	//printf("Handler is Null");
     }
+
+    vTaskDelay(pdMS_TO_TICKS(1000)); /* Delay for 1 second */
 
   }
 }
