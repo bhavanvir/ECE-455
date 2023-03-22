@@ -70,6 +70,11 @@ void check_handle_tasks_to_add_queue(void);
 void check_handle_tasks_to_remove_queue(void);
 void vTemplateTaskCallback(TimerHandle_t xTimer);
 void Template_Task(void *pvParameters);
+void add_dd_task(dd_task_list** head, dd_task* task);
+void remove_dd_task(dd_task_list** head, int task_id);
+dd_task* get_dd_task(dd_task_list* head, int task_id);
+void print_dd_task_list(dd_task_list* head);
+void sort_dd_task_list(dd_task_list** head);
 
 /*-----------------------------------------------------------*/
 
@@ -106,8 +111,8 @@ int main(void)
 	xQueue_To_Add = xQueueCreate(3, sizeof(dd_task));
 	xQueue_To_Remove = xQueueCreate(3, sizeof(uint32_t));
 
-	xTaskCreate(Deadline_Driven_Task_Generator, "Deadline-Driven Task Generator", configMINIMAL_STACK_SIZE, task_parameters, 1, NULL);
-	xTaskCreate(Deadline_Driven_Scheduler, "Deadline Driven Scheduler", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+	xTaskCreate(Deadline_Driven_Task_Generator, "Generator", configMINIMAL_STACK_SIZE, task_parameters, 2, NULL);
+	xTaskCreate(Deadline_Driven_Scheduler, "Scheduler", configMINIMAL_STACK_SIZE, NULL, 3, NULL);
 
 	/* Start the tasks and timer running. */
 	vTaskStartScheduler();
@@ -130,7 +135,7 @@ void create_dd_task(enum task_type type, uint32_t task_id, uint32_t absolute_dea
 	task->absolute_deadline = current_time + absolute_deadline;
 	task->completion_time = -1;
 	task->execution_time = execution_time;
-
+	//printf("IN create_dd_task WITH TASK ID: %u\n", task->task_id);
 	xQueueSend(xQueue_To_Add, &task, (TickType_t) UNIT_TIME);
 }
 
@@ -181,25 +186,34 @@ check_handle_get_request_queue(active_dd_task_list, complete_dd_task_list, overd
 
 /*-----------------------------------------------------------*/
 void Deadline_Driven_Scheduler(void *pvParameters){
-	dd_task_list active_dd_task_list;
-	dd_task_list complete_dd_task_list;
-	dd_task_list overdue_dd_task_list;
-	dd_task *task;
+	dd_task_list *active_head = NULL;
+	dd_task_list *completed_head = NULL;
+	dd_task_list *overdue_head = NULL;
+	dd_task *current_task = (dd_task*)pvPortMalloc(sizeof(dd_task));
+
 	int task_id_to_remove;
 
 	for(;;){
 		// Create tasks
-		while(xQueueReceive(xQueue_To_Add, &task, 0) == pdTRUE){
+		while(xQueueReceive(xQueue_To_Add, &current_task, 0) == pdTRUE){
 			char task_name[20];
-			sprintf(task_name, "Task %u", task->task_id+1);
-			xTaskCreate(Template_Task, task_name, configMINIMAL_STACK_SIZE, task, 1, xHandlers[task->task_id]);
+			sprintf(task_name, "Task %u", current_task->task_id+1);
+			if(xHandlers[current_task->task_id] == NULL){
+				xTaskCreate(Template_Task, task_name, configMINIMAL_STACK_SIZE, current_task, 1, &xHandlers[current_task->task_id]);
+				add_dd_task(&active_head, current_task);
+				//current_task = (dd_task*)pvPortMalloc(sizeof(dd_task));
+				//print_dd_task_list(active_head);
+			}
 		}
 
 		// Delete tasks
 		while(xQueueReceive(xQueue_To_Remove, &task_id_to_remove, 0) == pdTRUE){
-			vTaskSuspend(xHandlers[task_id_to_remove]);
-			vTaskDelete(xHandlers[task_id_to_remove]);
-
+			if(xHandlers[task_id_to_remove] != NULL ){
+					vTaskSuspend(xHandlers[task_id_to_remove]);
+					vTaskDelete(xHandlers[task_id_to_remove]);
+					xHandlers[task_id_to_remove] = NULL;
+					//printf("DELETED TASK WITH ID {%d} IN Deadline_Driven_Scheduler\n", task_id_to_remove+1);
+			}
 		}
 
 		vTaskDelay(pdMS_TO_TICKS(UNIT_TIME));
@@ -225,7 +239,6 @@ void Deadline_Driven_Task_Generator(void *pvParameters){
 void Template_Task(void *pvParameters){
 	dd_task *task = (dd_task *)pvParameters;
 
-	//printf("Template_Task: CREATED TASK %u\n", task->task_id+1);
 	TimerHandle_t xDD_Task_Timer = xTimerCreate("DD Task Timer", pdMS_TO_TICKS(task->execution_time), pdFALSE, (void *)task, vTemplateTaskCallback);
 	xTimerStart(xDD_Task_Timer, pdMS_TO_TICKS(task->execution_time));
 	for(;;){
@@ -234,15 +247,80 @@ void Template_Task(void *pvParameters){
 }
 
 /*-----------------------------------------------------------*/
+void add_dd_task(dd_task_list** head, dd_task* task) {
+    dd_task_list* new_dd_task = (dd_task_list*)pvPortMalloc(sizeof(dd_task_list));
+    new_dd_task->task = *task;
+    new_dd_task->next_task = *head;
+    *head = new_dd_task;
+}
+
+void remove_dd_task(dd_task_list** head, int task_id) {
+    dd_task_list *current = *head, *prev = NULL;
+    while (current != NULL) {
+        if (current->task.task_id == task_id) {
+            if (prev == NULL) {
+                // If the node to be removed is the head of the list
+                *head = current->next_task;
+            } else {
+                // If the node to be removed is not the head of the list
+                prev->next_task = current->next_task;
+            }
+            free(current);
+            return;
+        }
+        prev = current;
+        current = current->next_task;
+    }
+}
+
+dd_task* get_dd_task(dd_task_list* head, int task_id) {
+    dd_task_list* current = head;
+    while (current != NULL) {
+        if (current->task.task_id == task_id) {
+            return &(current->task);
+        }
+        current = current->next_task;
+    }
+    return NULL;
+}
+
+void print_dd_task_list(dd_task_list* head) {
+    dd_task_list* current = head;
+    while (current != NULL) {
+        printf("Task %u with deadline %u\n", current->task.task_id, current->task.absolute_deadline);
+        current = current->next_task;
+    }
+}
+
+void sort_dd_task_list(dd_task_list** head) {
+    dd_task_list *current, *search, *min;
+    dd_task temp;
+    if (*head == NULL) {
+        return;
+    }
+    for (current = *head; current->next_task != NULL; current = current->next_task) {
+        min = current;
+        for (search = current->next_task; search != NULL; search = search->next_task) {
+            if (search->task.absolute_deadline < min->task.absolute_deadline) {
+                min = search;
+            }
+        }
+        if (min != current) {
+            temp = current->task;
+            current->task = min->task;
+            min->task = temp;
+        }
+    }
+}
+/*-----------------------------------------------------------*/
 
 void vTemplateTaskCallback(TimerHandle_t xTimer){
 	TickType_t current_time = xTaskGetTickCount();
 	void *pvTimerID = pvTimerGetTimerID(xTimer);
+	//printf("Timer Callback Called \n");
 	dd_task *task = (dd_task *)pvTimerID;
-
 	task->completion_time = current_time - task->release_time;
-	//printf("vTemplateTaskCallback: %u\n", task->completion_time);
-	//printf("delete_dd_task: DELETED TASK %u\n", task->task_id+1);
+
 	xQueueSend(xQueue_To_Remove, &task->task_id, (TickType_t) UNIT_TIME);
 }
 
