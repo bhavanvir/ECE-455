@@ -71,10 +71,11 @@ void check_handle_tasks_to_remove_queue(void);
 void vTemplateTaskCallback(TimerHandle_t xTimer);
 void Template_Task(void *pvParameters);
 void add_dd_task(dd_task_list** head, dd_task* task);
-void remove_dd_task(dd_task_list** head, int task_id);
-dd_task* get_dd_task(dd_task_list* head, int task_id);
+void remove_dd_task(dd_task_list** head, uint32_t task_id);
+dd_task* get_dd_task(dd_task_list* head, uint32_t task_id);
 void print_dd_task_list(dd_task_list* head);
 void sort_dd_task_list(dd_task_list** head);
+int count_tasks(dd_task_list* head);
 
 /*-----------------------------------------------------------*/
 // Put back in DDS after debugging
@@ -141,11 +142,6 @@ void create_dd_task(enum task_type type, uint32_t task_id, uint32_t absolute_dea
 	task->execution_time = execution_time;
 	xQueueSend(xQueue_To_Add, &task, (TickType_t) UNIT_TIME);
 }
-
-void count_dd_list(dd_task_list task){
-
-}
-
 /*
 int get_active_dd_task_list(void){
 	dd_task_list** active_dd_list;
@@ -190,8 +186,7 @@ check_handle_get_request_queue(active_dd_task_list, complete_dd_task_list, overd
 /*-----------------------------------------------------------*/
 void Deadline_Driven_Scheduler(void *pvParameters){
 	dd_task *current_task = (dd_task*)pvPortMalloc(sizeof(dd_task));
-
-	int task_id_to_remove;
+	uint32_t task_id_to_remove;
 
 	for(;;){
 		// Create tasks
@@ -201,6 +196,7 @@ void Deadline_Driven_Scheduler(void *pvParameters){
 			if(xHandlers[current_task->task_id] == NULL){
 				xTaskCreate(Template_Task, task_name, configMINIMAL_STACK_SIZE, current_task, 1, &xHandlers[current_task->task_id]);
 				add_dd_task(&active_head, current_task);
+				sort_dd_task_list(&active_head);
 			}
 		}
 
@@ -210,6 +206,10 @@ void Deadline_Driven_Scheduler(void *pvParameters){
 					vTaskSuspend(xHandlers[task_id_to_remove]);
 					vTaskDelete(xHandlers[task_id_to_remove]);
 					xHandlers[task_id_to_remove] = NULL;
+
+					dd_task *completed_task = get_dd_task(active_head, task_id_to_remove);
+					remove_dd_task(&active_head, task_id_to_remove);
+					add_dd_task(&completed_head, completed_task);
 			}
 		}
 
@@ -229,9 +229,11 @@ void Deadline_Driven_Task_Generator(void *pvParameters){
 					   task_parameters[i%3].execution_time
 					   );
 		vTaskDelay(pdMS_TO_TICKS(task_parameters[i%3].period));
-		print_dd_task_list(active_head);
-		printf("\n");
 		i++;
+
+		print_dd_task_list(completed_head);
+		int count = count_tasks(completed_head);
+		printf("%d\n\n", count);
 	}
 }
 
@@ -253,7 +255,7 @@ void add_dd_task(dd_task_list** head, dd_task* task) {
     *head = new_dd_task;
 }
 
-void remove_dd_task(dd_task_list** head, int task_id) {
+void remove_dd_task(dd_task_list** head, uint32_t task_id) {
     dd_task_list *current = *head, *prev = NULL;
     while (current != NULL) {
         if (current->task.task_id == task_id) {
@@ -264,7 +266,7 @@ void remove_dd_task(dd_task_list** head, int task_id) {
                 // If the node to be removed is not the head of the list
                 prev->next_task = current->next_task;
             }
-            free(current);
+            vPortFree(current);
             return;
         }
         prev = current;
@@ -272,7 +274,7 @@ void remove_dd_task(dd_task_list** head, int task_id) {
     }
 }
 
-dd_task* get_dd_task(dd_task_list* head, int task_id) {
+dd_task* get_dd_task(dd_task_list* head, uint32_t task_id) {
     dd_task_list* current = head;
     while (current != NULL) {
         if (current->task.task_id == task_id) {
@@ -310,6 +312,22 @@ void sort_dd_task_list(dd_task_list** head) {
             min->task = temp;
         }
     }
+}
+
+int count_tasks(dd_task_list* head){
+	dd_task_list *current = head;
+
+	int tasks[3] = {0, 0, 0};
+	int unique_count = 0;
+	while(current != NULL) {
+		if(tasks[current->task.task_id] == 0) {
+			tasks[current->task.task_id]++;
+			unique_count++;
+		}
+		current = current->next_task;
+	}
+
+	return unique_count;
 }
 /*-----------------------------------------------------------*/
 
