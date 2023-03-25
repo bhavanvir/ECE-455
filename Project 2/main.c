@@ -35,7 +35,6 @@ typedef struct {
 	uint32_t absolute_deadline;
 	uint32_t completion_time;
 	uint32_t execution_time;
-	struct dd_task *next_task;
 } dd_task;
 
 typedef struct {
@@ -93,6 +92,7 @@ dd_task* get_dd_task(dd_task_list* head, uint32_t task_id);
 void print_dd_task_list(dd_task_list* head);
 void sort_dd_task_list(dd_task_list** head);
 int count_tasks(dd_task_list* head);
+void update_priorities_dd_task(dd_task_list* head);
 /***************************************************************************************************************/
 
 /*-----------------------------------------------------------*/
@@ -190,6 +190,8 @@ void Deadline_Driven_Scheduler(void *pvParameters){
 				sort_dd_task_list(&active_head);
 				remove_dd_task(&completed_head,  current_task->task_id);
 				remove_dd_task(&overdue_head,  current_task->task_id);
+				//
+				//print_dd_task_list(&active_head);
 			}
 			//vPortFree(current_task);
 		}
@@ -225,7 +227,6 @@ void Deadline_Driven_Scheduler(void *pvParameters){
 
 			xQueueOverwrite(xQueue_DD_List_Response, &lists_counts);
 		}
-
 		vTaskDelay(pdMS_TO_TICKS(UNIT_TIME));
 	}
 }
@@ -284,7 +285,7 @@ void Monitor_Task(void *pvParameters){
 		if(xQueueReceive(xQueue_DD_List_Response, &lists_counts, ( TickType_t ) UNIT_TIME ) == pdPASS){
 			printf("Active Count: %d  Overdue Count: %d  Complete Count: %d\n",lists_counts->active_count, lists_counts->overdue_count, lists_counts->compelete_count);
 		}
-
+		update_priorities_dd_task(&active_head);
 		vTaskDelay(pdMS_TO_TICKS(1000*UNIT_TIME));
 	}
 }
@@ -341,6 +342,21 @@ void print_dd_task_list(dd_task_list* head) {
     dd_task_list* current = head;
     while (current != NULL) {
         printf("Task %u with deadline %u with completion time %u \n", current->task.task_id, current->task.absolute_deadline, current->task.completion_time);
+        current = current->next_task;
+    }
+}
+
+void update_priorities_dd_task(dd_task_list* head) {
+    dd_task_list* current = head;
+    int priority = 2;
+    while (current != NULL) {
+        //printf("Task %u with deadline %u with completion time %u \n", current->task.task_id, current->task.absolute_deadline, current->task.completion_time);
+    	printf("current ID being iterated through is %u\n",current->task.task_id);
+    	if(xHandlers[current->task.task_id] != NULL){
+    		vTaskPrioritySet( xHandlers[current->task.task_id], priority);
+    	}
+
+    	priority --;
         current = current->next_task;
     }
 }
