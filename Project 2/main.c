@@ -115,7 +115,7 @@ int main(void)
 
 	// Task 1
 	task_parameters[0].execution_time = 95;
-	task_parameters[0].period = 96;
+	task_parameters[0].period = 500;
 	task_parameters[0].task_id = 0;
 	task_parameters[0].type = PERIODIC;
 	// Task 2
@@ -242,7 +242,7 @@ void Deadline_Driven_Task_Generator1(void *pvParameters){
 					   task_parameters[0].execution_time
 					   );
 
-		vTaskDelay(pdMS_TO_TICKS(task_parameters[0].period*10));
+		vTaskDelay(pdMS_TO_TICKS(task_parameters[0].period));
 	}
 }
 
@@ -256,7 +256,7 @@ void Deadline_Driven_Task_Generator2(void *pvParameters){
 					   task_parameters[1].period,
 					   task_parameters[1].execution_time
 					   );
-		vTaskDelay(pdMS_TO_TICKS(task_parameters[1].period*10));
+		vTaskDelay(pdMS_TO_TICKS(task_parameters[1].period));
 	}
 }
 
@@ -270,7 +270,7 @@ void Deadline_Driven_Task_Generator3(void *pvParameters){
 					   task_parameters[2].period,
 					   task_parameters[2].execution_time
 					   );
-		vTaskDelay(pdMS_TO_TICKS(task_parameters[2].period*10));
+		vTaskDelay(pdMS_TO_TICKS(task_parameters[2].period));
 	}
 }
 
