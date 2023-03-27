@@ -27,6 +27,7 @@ TaskHandle_t xHandlerTask3 = NULL;
 TaskHandle_t xHandlers[3];
 
 enum task_type {PERIODIC = 0, APERIODIC = 1};
+enum remove_flag {REMOVE = 1, KEEP = 0};
 
 typedef struct {
 	enum task_type type;
@@ -38,7 +39,8 @@ typedef struct {
 } dd_task;
 
 typedef struct {
-	dd_task task;
+	dd_task *task;
+	uint32_t task_id;
 	struct dd_task_list *next_task;
 } dd_task_list;
 
@@ -63,9 +65,8 @@ typedef struct {
 
 static void prvSetupHardware(void);
 
-/***************************************************************************************************************/
+/*-----------------------------------------------------------*/
 //Functions signatures
-
 void create_dd_task(enum task_type type, uint32_t task_id, uint32_t absolute_deadline, uint32_t execution_time);
 void delete_dd_task(uint32_t task_id);
 
@@ -79,24 +80,21 @@ void Deadline_Driven_Task_Generator2(void *pvParameters);
 void Deadline_Driven_Task_Generator3(void *pvParameters);
 void Monitor_Task(void *pvParameters);
 
-
 void vTemplateTaskCallback(TimerHandle_t xTimer);
 void Template_Task(void *pvParameters);
 
 void check_handle_tasks_to_add_queue(void);
 void check_handle_tasks_to_remove_queue(void);
 
-void add_dd_task(dd_task_list** head, dd_task* task);
-void remove_dd_task(dd_task_list** head, uint32_t task_id);
-dd_task* get_dd_task(dd_task_list* head, uint32_t task_id);
-void print_dd_task_list(dd_task_list* head);
+void add_dd_task(dd_task_list** head, dd_task* task, uint32_t task_id);
+dd_task* get_dd_task(dd_task_list** head, uint32_t task_id);
+void remove_dd_task(dd_task_list** head, uint32_t task_id, int remove_flag);
+void print_dd_task_list(dd_task_list** head);
 void sort_dd_task_list(dd_task_list** head);
-int count_tasks(dd_task_list* head);
-void update_priorities_dd_task(dd_task_list* head);
-/***************************************************************************************************************/
-
+int count_tasks(dd_task_list** head);
+void update_priorities_dd_task(dd_task_list** head);
 /*-----------------------------------------------------------*/
-// Put back in DDS after debugging
+
 dd_task_list *active_head = NULL;
 dd_task_list *completed_head = NULL;
 dd_task_list *overdue_head = NULL;
@@ -117,7 +115,7 @@ int main(void)
 
 	// Task 1
 	task_parameters[0].execution_time = 95;
-	task_parameters[0].period = 500;
+	task_parameters[0].period = 96;
 	task_parameters[0].task_id = 0;
 	task_parameters[0].type = PERIODIC;
 	// Task 2
@@ -127,7 +125,7 @@ int main(void)
 	task_parameters[1].type = PERIODIC;
 	// Task 3
 	task_parameters[2].execution_time = 250;
-	task_parameters[2].period = 500;
+	task_parameters[2].period = 750;
 	task_parameters[2].task_id = 2;
 	task_parameters[2].type = PERIODIC;
 
@@ -137,12 +135,11 @@ int main(void)
 	xQueue_DD_List_Request = xQueueCreate(1, sizeof(uint32_t));
 	xQueue_DD_List_Response = xQueueCreate(1, sizeof(dd_task_lists_count));
 
-	xTaskCreate(Deadline_Driven_Task_Generator1, "Generator 1", configMINIMAL_STACK_SIZE, task_parameters, 2, NULL);
-	xTaskCreate(Deadline_Driven_Task_Generator2, "Generator 2", configMINIMAL_STACK_SIZE, task_parameters, 2, NULL);
-	xTaskCreate(Deadline_Driven_Task_Generator3, "Generator 3", configMINIMAL_STACK_SIZE, task_parameters, 2, NULL);
+	xTaskCreate(Deadline_Driven_Task_Generator1, "Generator 1", configMINIMAL_STACK_SIZE, task_parameters, 3, NULL);
+	xTaskCreate(Deadline_Driven_Task_Generator2, "Generator 2", configMINIMAL_STACK_SIZE, task_parameters, 3, NULL);
+	xTaskCreate(Deadline_Driven_Task_Generator3, "Generator 3", configMINIMAL_STACK_SIZE, task_parameters, 3, NULL);
 	xTaskCreate(Deadline_Driven_Scheduler, "Scheduler", configMINIMAL_STACK_SIZE, NULL, 2, NULL);
 	xTaskCreate(Monitor_Task, "Monitor", configMINIMAL_STACK_SIZE, NULL, 2, NULL);
-
 
 	/* Start the tasks and timer running. */
 	vTaskStartScheduler();
@@ -165,14 +162,13 @@ void create_dd_task(enum task_type type, uint32_t task_id, uint32_t absolute_dea
 	task->absolute_deadline = current_time + absolute_deadline;
 	task->completion_time = -1;
 	task->execution_time = execution_time;
+
 	xQueueSend(xQueue_To_Add, (void *)&task, (TickType_t) UNIT_TIME);
 }
 
-
 /*-----------------------------------------------------------*/
 void Deadline_Driven_Scheduler(void *pvParameters){
-
-	dd_task *current_task;// = (dd_task*)pvPortMalloc(sizeof(dd_task));
+	dd_task *current_task;
 	dd_task_end_callback* task_to_remove_data;
 	dd_task_lists_count *lists_counts = (dd_task_lists_count*)pvPortMalloc(sizeof(dd_task_lists_count));
 
@@ -182,52 +178,56 @@ void Deadline_Driven_Scheduler(void *pvParameters){
 		// Create tasks
 		while(xQueueReceive(xQueue_To_Add, &current_task, 0) == pdTRUE){
 			char task_name[20];
-			printf("task %u is created\n\n",current_task->task_id);
+			printf("Task %u is created\n", current_task->task_id+1);
 			sprintf(task_name, "Task %u\0", current_task->task_id+1);
 			if(xHandlers[current_task->task_id] == NULL){
 				xTaskCreate(Template_Task, task_name, configMINIMAL_STACK_SIZE, current_task, 1, &xHandlers[current_task->task_id]);
-				add_dd_task(&active_head, current_task);
+				add_dd_task(&active_head, current_task, current_task->task_id);
 				sort_dd_task_list(&active_head);
-				remove_dd_task(&completed_head,  current_task->task_id);
-				remove_dd_task(&overdue_head,  current_task->task_id);
-				//
-				//print_dd_task_list(&active_head);
+				update_priorities_dd_task(&active_head);
+				remove_dd_task(&completed_head,  current_task->task_id, REMOVE);
+				remove_dd_task(&overdue_head,  current_task->task_id, REMOVE);
 			}
-			//vPortFree(current_task);
 		}
 
 		// Delete tasks
 		while(xQueueReceive(xQueue_To_Remove, &task_to_remove_data, 0) == pdTRUE){
 			if(xHandlers[task_to_remove_data->task_id] != NULL ){
-				printf("task %u is being deleted\n\n",current_task->task_id);
+				printf("Task %u is deleted\n", current_task->task_id+1);
 				vTaskSuspend(xHandlers[task_to_remove_data->task_id]);
 				vTaskDelete(xHandlers[task_to_remove_data->task_id]);
 				xHandlers[task_to_remove_data->task_id] = NULL;
 
-				dd_task *completed_task = get_dd_task(active_head, task_to_remove_data->task_id);
+				dd_task *completed_task = get_dd_task(&active_head, task_to_remove_data->task_id);
 				completed_task->completion_time = task_to_remove_data->completion_time;
 
-				remove_dd_task(&active_head,  task_to_remove_data->task_id);
+				remove_dd_task(&active_head,  task_to_remove_data->task_id, KEEP);
 				if(completed_task->completion_time > completed_task->absolute_deadline){
-					add_dd_task(&overdue_head, completed_task);
+					add_dd_task(&overdue_head, completed_task, completed_task->task_id);
 				}else{
-					add_dd_task(&completed_head, completed_task);
+					add_dd_task(&completed_head, completed_task, completed_task->task_id);
 				}
 
 				vPortFree(task_to_remove_data);
 			}
 		}
 
-
-
 		if(xQueueReceive(xQueue_DD_List_Request, &DDS_list_request_flag, ( TickType_t ) UNIT_TIME ) == pdPASS){
-			lists_counts->active_count = count_tasks(active_head);
-			lists_counts->compelete_count = count_tasks(completed_head);
-			lists_counts->overdue_count = count_tasks(overdue_head);
+			lists_counts->active_count = count_tasks(&active_head);
+			lists_counts->compelete_count = count_tasks(&completed_head);
+			lists_counts->overdue_count = count_tasks(&overdue_head);
 
+			printf("\n");
+			printf("ACTIVE LIST:\n");
+			print_dd_task_list(&active_head);
+			printf("OVERDUE LIST:\n");
+			print_dd_task_list(&overdue_head);
+			printf("COMPLETED LIST:\n");
+			print_dd_task_list(&completed_head);
+			printf("\n");
 			xQueueOverwrite(xQueue_DD_List_Response, &lists_counts);
 		}
-		vTaskDelay(pdMS_TO_TICKS(UNIT_TIME));
+		vTaskDelay(pdMS_TO_TICKS(10*UNIT_TIME));
 	}
 }
 
@@ -241,7 +241,8 @@ void Deadline_Driven_Task_Generator1(void *pvParameters){
 					   task_parameters[0].period,
 					   task_parameters[0].execution_time
 					   );
-		vTaskDelay(pdMS_TO_TICKS(task_parameters[0].period));
+
+		vTaskDelay(pdMS_TO_TICKS(task_parameters[0].period*10));
 	}
 }
 
@@ -255,7 +256,7 @@ void Deadline_Driven_Task_Generator2(void *pvParameters){
 					   task_parameters[1].period,
 					   task_parameters[1].execution_time
 					   );
-		vTaskDelay(pdMS_TO_TICKS(task_parameters[1].period));
+		vTaskDelay(pdMS_TO_TICKS(task_parameters[1].period*10));
 	}
 }
 
@@ -269,7 +270,7 @@ void Deadline_Driven_Task_Generator3(void *pvParameters){
 					   task_parameters[2].period,
 					   task_parameters[2].execution_time
 					   );
-		vTaskDelay(pdMS_TO_TICKS(task_parameters[2].period));
+		vTaskDelay(pdMS_TO_TICKS(task_parameters[2].period*10));
 	}
 }
 
@@ -277,7 +278,7 @@ void Monitor_Task(void *pvParameters){
 
 	uint32_t set_flag = 1;
 
-	dd_task_lists_count *lists_counts; //= (dd_task_lists_count*)pvPortMalloc(sizeof(dd_task_lists_count));
+	dd_task_lists_count *lists_counts;
 
 	for(;;){
 		xQueueOverwrite(xQueue_DD_List_Request, &set_flag);
@@ -285,8 +286,8 @@ void Monitor_Task(void *pvParameters){
 		if(xQueueReceive(xQueue_DD_List_Response, &lists_counts, ( TickType_t ) UNIT_TIME ) == pdPASS){
 			printf("Active Count: %d  Overdue Count: %d  Complete Count: %d\n",lists_counts->active_count, lists_counts->overdue_count, lists_counts->compelete_count);
 		}
-		update_priorities_dd_task(&active_head);
-		vTaskDelay(pdMS_TO_TICKS(1000*UNIT_TIME));
+
+		vTaskDelay(pdMS_TO_TICKS(100*UNIT_TIME));
 	}
 }
 
@@ -301,17 +302,31 @@ void Template_Task(void *pvParameters){
 }
 
 /*-----------------------------------------------------------*/
-void add_dd_task(dd_task_list** head, dd_task* task) {
+void add_dd_task(dd_task_list** head, dd_task* task, uint32_t task_id) {
     dd_task_list* new_dd_task = (dd_task_list*)pvPortMalloc(sizeof(dd_task_list));
-    new_dd_task->task = *task;
+    //new_dd_task->task = NULL;
+    new_dd_task->task_id = task_id;
+    new_dd_task->task = task;
     new_dd_task->next_task = *head;
     *head = new_dd_task;
 }
 
-void remove_dd_task(dd_task_list** head, uint32_t task_id) {
+dd_task* get_dd_task(dd_task_list** head, uint32_t task_id) {
+    dd_task_list* current = *head;
+    while (current != NULL) {
+        if (current->task->task_id == task_id) {
+            return current->task;
+        }
+        current = current->next_task;
+    }
+    return NULL;
+}
+
+
+void remove_dd_task(dd_task_list** head, uint32_t task_id, int remove_flag) {
     dd_task_list *current = *head, *prev = NULL;
     while (current != NULL) {
-        if (current->task.task_id == task_id) {
+        if (current->task->task_id == task_id) {
             if (prev == NULL) {
                 // If the node to be removed is the head of the list
                 *head = current->next_task;
@@ -319,7 +334,12 @@ void remove_dd_task(dd_task_list** head, uint32_t task_id) {
                 // If the node to be removed is not the head of the list
                 prev->next_task = current->next_task;
             }
+
+            if (remove_flag == 1) {
+            	vPortFree(current->task);
+            }
             vPortFree(current);
+
             return;
         }
         prev = current;
@@ -327,50 +347,25 @@ void remove_dd_task(dd_task_list** head, uint32_t task_id) {
     }
 }
 
-dd_task* get_dd_task(dd_task_list* head, uint32_t task_id) {
-    dd_task_list* current = head;
-    while (current != NULL) {
-        if (current->task.task_id == task_id) {
-            return &(current->task);
-        }
-        current = current->next_task;
-    }
-    return NULL;
-}
 
-void print_dd_task_list(dd_task_list* head) {
-    dd_task_list* current = head;
+void print_dd_task_list(dd_task_list** head) {
+    dd_task_list* current = *head;
     while (current != NULL) {
-        printf("Task %u with deadline %u with completion time %u \n", current->task.task_id, current->task.absolute_deadline, current->task.completion_time);
-        current = current->next_task;
-    }
-}
-
-void update_priorities_dd_task(dd_task_list* head) {
-    dd_task_list* current = head;
-    int priority = 2;
-    while (current != NULL) {
-        //printf("Task %u with deadline %u with completion time %u \n", current->task.task_id, current->task.absolute_deadline, current->task.completion_time);
-    	printf("current ID being iterated through is %u\n",current->task.task_id);
-    	if(xHandlers[current->task.task_id] != NULL){
-    		vTaskPrioritySet( xHandlers[current->task.task_id], priority);
-    	}
-
-    	priority --;
-        current = current->next_task;
+		printf("\tTask %u with deadline %u\n", current->task->task_id+1, current->task->absolute_deadline);
+    	current = current->next_task;
     }
 }
 
 void sort_dd_task_list(dd_task_list** head) {
     dd_task_list *current, *search, *min;
-    dd_task temp;
+    dd_task *temp;
     if (*head == NULL) {
         return;
     }
     for (current = *head; current->next_task != NULL; current = current->next_task) {
         min = current;
         for (search = current->next_task; search != NULL; search = search->next_task) {
-            if (search->task.absolute_deadline < min->task.absolute_deadline) {
+            if (search->task->absolute_deadline < min->task->absolute_deadline) {
                 min = search;
             }
         }
@@ -382,14 +377,29 @@ void sort_dd_task_list(dd_task_list** head) {
     }
 }
 
-int count_tasks(dd_task_list* head){
-	dd_task_list *current = head;
+void update_priorities_dd_task(dd_task_list** head) {
+    dd_task_list* current = *head;
+    int priority = 2;
+    while (current != NULL) {
+        //printf("Task %u with deadline %u with completion time %u \n", current->task.task_id, current->task.absolute_deadline, current->task.completion_time);
+    	//printf("current ID being iterated through is %u and priority is %d\n",current->task->task_id, priority);
+    	if(xHandlers[current->task->task_id] != NULL){
+    		vTaskPrioritySet( xHandlers[current->task->task_id], priority);
+    	}
+
+    	priority --;
+        current = current->next_task;
+    }
+}
+
+int count_tasks(dd_task_list** head){
+	dd_task_list *current = *head;
 
 	int tasks[3] = {0, 0, 0};
 	int unique_count = 0;
 	while(current != NULL) {
-		if(tasks[current->task.task_id] == 0) {
-			tasks[current->task.task_id]++;
+		if(tasks[current->task->task_id] == 0) {
+			tasks[current->task->task_id]++;
 			unique_count++;
 		}
 		current = current->next_task;
