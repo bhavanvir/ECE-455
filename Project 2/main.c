@@ -487,9 +487,9 @@ void print_dd_task_list( dd_task_list** head )
  */
 void sort_dd_task_list( dd_task_list** head ) 
 {
-	// Get the head of the list and the current and search tasks
+	// Define the head of the list and the current and search tasks
     dd_task_list *current, *search, *min;
-	// Get a temporary task pointer
+	// Define a temporary task pointer
     dd_task *temp;
 	// Check if the list is empty
     if ( *head == NULL )
