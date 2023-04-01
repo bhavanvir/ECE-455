@@ -65,7 +65,8 @@ typedef struct
 } dd_task_end_callback;
 
 // Structure for the task lists count
-typedef struct {
+typedef struct 
+{
 	int active_count;
 	int overdue_count;
 	int compelete_count;
@@ -74,9 +75,6 @@ typedef struct {
 // Stubs for the functions
 static void prvSetupHardware( void );
 void create_dd_task( enum task_type type, uint32_t task_id, uint32_t absolute_deadline, uint32_t execution_time );
-dd_task_list** get_active_dd_task_list( void );
-dd_task_list** get_complete_dd_task_list( void );
-dd_task_list** get_overdue_dd_task_list( void );
 void Deadline_Driven_Scheduler( void *pvParameters );
 void Deadline_Driven_Task_Generator1( void *pvParameters );
 void Deadline_Driven_Task_Generator2( void *pvParameters );
